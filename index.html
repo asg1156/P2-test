@@ -1,153 +1,47 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html>
 <head>
     <meta charset="UTF-8">
+    <title>P2P Ultra-Light</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>P2P Debug MVP</title>
     <style>
-        body { font-family: sans-serif; padding: 15px; max-width: 500px; margin: 0 auto; background: #f4f7f9; }
-        .error { color: #721c24; background: #f8d7da; padding: 10px; border-radius: 5px; display: none; margin-bottom: 10px; border: 1px solid #f5c6cb; }
-        .log-box { font-size: 12px; color: #155724; background: #d4edda; padding: 8px; height: 40px; overflow-y: auto; border: 1px solid #c3e6cb; margin-bottom: 15px; border-radius: 5px; }
-        textarea { width: 100%; height: 70px; font-size: 11px; margin: 5px 0; border: 1px solid #ccc; border-radius: 4px; padding: 5px; box-sizing: border-box; }
-        button { width: 100%; padding: 12px; margin: 8px 0; cursor: pointer; border: none; border-radius: 6px; font-weight: bold; font-size: 14px; }
-        .btn-create { background: #28a745; color: white; }
-        .btn-accept { background: #007bff; color: white; }
-        .btn-finalize { background: #6c757d; color: white; }
-        #chat { border: 1px solid #ddd; height: 120px; margin-top: 15px; padding: 10px; background: #fff; overflow-y: auto; border-radius: 5px; }
-        .msg-line { margin-bottom: 5px; border-bottom: 1px solid #eee; padding-bottom: 2px; }
+        body { font-family: sans-serif; padding: 20px; }
+        .err { color: red; border: 1px solid red; padding: 10px; display: none; }
+        textarea { width: 100%; height: 100px; margin: 10px 0; font-size: 10px; }
+        button { width: 100%; padding: 15px; background: #28a745; color: white; border: none; cursor: pointer; }
     </style>
 </head>
 <body>
+    <div id="error" class="err"></div>
+    <div id="log">Статус: Готов</div>
 
-    <div id="errBox" class="error"></div>
-    <div id="statusLog" class="log-box">Статус: Готов к работе</div>
+    <button onclick="start()">1. НАЖМИ МЕНЯ (СОЗДАТЬ)</button>
+    <textarea id="out" readonly></textarea>
 
-    <h3>1. Алиса (Инициатор)</h3>
-    <button class="btn-create" onclick="handleCreate()">Создать Оффер</button>
-    <textarea id="outBox" readonly placeholder="Тут появится ваш секретный код"></textarea>
+    <script>
+        function start() {
+            try {
+                document.getElementById('log').innerText = "Пробую создать соединение...";
+                
+                // Пробуем ВООБЩЕ БЕЗ СЕРВЕРОВ (для локального теста)
+                // Если сработает так - значит проблема была в строке "stun:..."
+                const pc = new RTCPeerConnection({ iceServers: [] });
+                
+                pc.onicecandidate = e => {
+                    if (!e.candidate) {
+                        document.getElementById('out').value = JSON.stringify(pc.localDescription);
+                        document.getElementById('log').innerText = "ГОТОВО!";
+                    }
+                };
 
-    <h3>2. Боб / Алиса</h3>
-    <textarea id="inBox" placeholder="Вставьте код партнера сюда"></textarea>
-    <button class="btn-accept" onclick="handleAccept()">Принять Оффер (Я - Боб)</button>
-    <button class="btn-finalize" onclick="handleFinal()">Завершить (Я - Алиса)</button>
-
-    <h3>Чат</h3>
-    <div id="chat"></div>
-    <div style="display:flex; margin-top:10px; gap:5px;">
-        <input type="text" id="msgInput" style="flex-grow:1; padding:10px; border-radius:5px; border:1px solid #ccc;">
-        <button onclick="handleSend()" style="width:auto; margin:0; background:#333;">OK</button>
-    </div>
-
-<script>
-    const errBox = document.getElementById('errBox');
-    const logBox = document.getElementById('statusLog');
-    const outBox = document.getElementById('outBox');
-    const inBox = document.getElementById('inBox');
-    const chat = document.getElementById('chat');
-
-    function log(msg) { logBox.innerText = "Статус: " + msg; console.log(msg); }
-    function showError(msg) { 
-        errBox.innerText = "ОШИБКА: " + msg; 
-        errBox.style.display = 'block'; 
-        log("Сбой в работе.");
-    }
-
-    // Правильный формат конфига для современных Chrome
-    const rtcConfig = {
-        iceServers: [
-            { 
-                urls: ["stun:://google.com", "stun:://google.com"] 
+                const dc = pc.createDataChannel("t");
+                pc.createOffer().then(o => pc.setLocalDescription(o));
+                
+            } catch (err) {
+                document.getElementById('error').innerText = "ОШИБКА: " + err.message;
+                document.getElementById('error').style.display = 'block';
             }
-        ]
-    };
-
-    let pc, dc;
-
-    try {
-        pc = new RTCPeerConnection(rtcConfig);
-        
-        pc.onicecandidate = (e) => {
-            if (!e.candidate && pc.localDescription) {
-                outBox.value = JSON.stringify(pc.localDescription);
-                log("Код успешно сгенерирован! Скопируйте его.");
-                outBox.select();
-            }
-        };
-
-        pc.ondatachannel = (e) => {
-            log("Получен входящий канал данных.");
-            setDC(e.channel);
-        };
-    } catch (e) {
-        showError("Ошибка инициализации RTCPeerConnection: " + e.message);
-    }
-
-    function setDC(chan) {
-        dc = chan;
-        dc.onopen = () => {
-            log("P2P СОЕДИНЕНИЕ УСТАНОВЛЕНО!");
-            chat.innerHTML += "<div class='msg-line' style='color:green'><b>Система: Вы на прямой связи!</b></div>";
-        };
-        dc.onmessage = (e) => {
-            chat.innerHTML += "<div class='msg-line'><b>Партнер:</b> " + e.data + "</div>";
-            chat.scrollTop = chat.scrollHeight;
-        };
-    }
-
-    async function handleCreate() {
-        try {
-            errBox.style.display = 'none';
-            log("Генерация оффера...");
-            dc = pc.createDataChannel("chat-channel");
-            setDC(dc);
-            const offer = await pc.createOffer();
-            await pc.setLocalDescription(offer);
-        } catch (e) {
-            showError("Не удалось создать оффер: " + e.message);
         }
-    }
-
-    async function handleAccept() {
-        try {
-            errBox.style.display = 'none';
-            const rawData = inBox.value.trim();
-            if (!rawData) return showError("Поле пустое. Вставьте код от Алисы.");
-            
-            log("Принимаю оффер и создаю ответ...");
-            const offerDesc = new RTCSessionDescription(JSON.parse(rawData));
-            await pc.setRemoteDescription(offerDesc);
-            const answer = await pc.createAnswer();
-            await pc.setLocalDescription(answer);
-        } catch (e) {
-            showError("Ошибка при приеме: " + e.message);
-        }
-    }
-
-    async function handleFinal() {
-        try {
-            errBox.style.display = 'none';
-            const rawData = inBox.value.trim();
-            if (!rawData) return showError("Поле пустое. Вставьте ответ от Боба.");
-            
-            log("Завершаю рукопожатие...");
-            const answerDesc = new RTCSessionDescription(JSON.parse(rawData));
-            await pc.setRemoteDescription(answerDesc);
-        } catch (e) {
-            showError("Ошибка при завершении: " + e.message);
-        }
-    }
-
-    function handleSend() {
-        const input = document.getElementById('msgInput');
-        if (dc && dc.readyState === 'open') {
-            dc.send(input.value);
-            chat.innerHTML += "<div class='msg-line'><b>Я:</b> " + input.value + "</div>";
-            input.value = "";
-            chat.scrollTop = chat.scrollHeight;
-        } else {
-            alert("Соединение еще не установлено.");
-        }
-    }
-</script>
+    </script>
 </body>
 </html>
