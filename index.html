@@ -1,83 +1,111 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html>
 <head>
     <meta charset="UTF-8">
+    <title>P2P Debug</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>P2P Test</title>
     <style>
-        body { font-family: sans-serif; padding: 20px; max-width: 500px; margin: 0 auto; background: #f0f0f0; }
-        textarea { width: 100%; height: 100px; margin: 10px 0; font-size: 10px; }
-        button { padding: 10px; width: 100%; cursor: pointer; background: #28a745; color: white; border: none; margin-bottom: 5px; }
-        #chat { height: 100px; border: 1px solid #ccc; background: white; overflow-y: scroll; padding: 5px; margin-top: 10px; }
+        body { font-family: sans-serif; padding: 10px; }
+        .error { color: red; background: #ffdada; padding: 10px; border-radius: 5px; display: none; margin-bottom: 10px; }
+        textarea { width: 100%; height: 60px; font-size: 10px; margin: 5px 0; }
+        button { width: 100%; padding: 12px; margin: 5px 0; cursor: pointer; border: none; border-radius: 5px; background: #28a745; color: white; }
+        #log { font-size: 12px; color: #666; background: #eee; padding: 5px; height: 50px; overflow: scroll; }
     </style>
 </head>
 <body>
-    <h3>Шаг 1: Алиса</h3>
-    <button onclick="doCreateOffer()">Создать Оффер</button>
-    <textarea id="output" readonly></textarea>
+    <div id="errBox" class="error"></div>
+    <div id="log">Лог событий...</div>
 
-    <h3>Шаг 2: Боб / Алиса</h3>
-    <textarea id="input" placeholder="Вставьте код сюда"></textarea>
-    <button onclick="doAcceptOffer()" style="background:#007bff">Принять Оффер (Боб)</button>
-    <button onclick="doFinalize()" style="background:#6c757d">Завершить (Алиса)</button>
+    <h3>1. Алиса</h3>
+    <button onclick="handleCreate()">Создать Оффер</button>
+    <textarea id="outBox" readonly placeholder="Результат появится тут"></textarea>
 
-    <div id="chat"></div>
-    <input type="text" id="msg" style="width:70%" placeholder="Сообщение...">
-    <button onclick="doSend()" style="width:25%; background:#333">OK</button>
+    <h3>2. Боб / Алиса</h3>
+    <textarea id="inBox" placeholder="Вставьте код партнера сюда"></textarea>
+    <button onclick="handleAccept()" style="background:#007bff">Принять Оффер (Боб)</button>
+    <button onclick="handleFinal()" style="background:#6c757d">Завершить (Алиса)</button>
 
-    <script>
-        // Самый простой конфиг
-        const pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:://google.com" }] });
-        let dc;
+    <div id="chat" style="border:1px solid #ccc; height:80px; margin-top:10px; padding:5px; background:#fff"></div>
+    <input type="text" id="msg" style="width:70%"><button onclick="handleSend()" style="width:25%; background:#333; padding:5px">OK</button>
 
-        // Следим за сбором данных для передачи
+<script>
+    // Функция для вывода ошибок прямо на экран
+    function showError(text) {
+        const box = document.getElementById('errBox');
+        box.innerText = text;
+        box.style.display = 'block';
+        console.error(text);
+    }
+
+    function log(text) {
+        document.getElementById('log').innerText = text;
+    }
+
+    // Проверка поддержки WebRTC
+    if (!window.RTCPeerConnection) {
+        showError("Ваш браузер не поддерживает WebRTC!");
+    }
+
+    const config = { iceServers: [{ urls: "stun:://google.com" }] };
+    let pc, dc;
+
+    try {
+        pc = new RTCPeerConnection(config);
+        
         pc.onicecandidate = e => {
-            if (!e.candidate) {
-                document.getElementById('output').value = JSON.stringify(pc.localDescription);
-                console.log("Код готов!");
+            if (!e.candidate && pc.localDescription) {
+                document.getElementById('outBox').value = JSON.stringify(pc.localDescription);
+                log("Код готов! Копируйте его.");
             }
         };
 
-        pc.ondatachannel = e => setupDC(e.channel);
+        pc.ondatachannel = e => setDC(e.channel);
+    } catch(e) { showError("Ошибка инициализации: " + e.message); }
 
-        function setupDC(chan) {
-            dc = chan;
-            dc.onopen = () => append("СИСТЕМА: СВЯЗЬ ЕСТЬ!");
-            dc.onmessage = e => append("ПАРТНЕР: " + e.data);
-        }
+    function setDC(ch) {
+        dc = ch;
+        dc.onopen = () => { log("СВЯЗЬ ЕСТЬ!"); alert("Соединение установлено!"); };
+        dc.onmessage = e => { document.getElementById('chat').innerHTML += "<div>ПАРТНЕР: "+e.data+"</div>"; };
+    }
 
-        async function doCreateOffer() {
-            console.log("Создаю оффер...");
+    async function handleCreate() {
+        try {
+            log("Генерация оффера...");
             dc = pc.createDataChannel("chat");
-            setupDC(dc);
+            setDC(dc);
             const offer = await pc.createOffer();
             await pc.setLocalDescription(offer);
-        }
+        } catch(e) { showError("Ошибка в Шаге 1: " + e.message); }
+    }
 
-        async function doAcceptOffer() {
-            console.log("Принимаю оффер...");
-            const str = document.getElementById('input').value;
-            await pc.setRemoteDescription(JSON.parse(str));
+    async function handleAccept() {
+        try {
+            log("Прием оффера...");
+            const input = document.getElementById('inBox').value.trim();
+            if (!input) throw new Error("Поле пустое!");
+            await pc.setRemoteDescription(new RTCSessionDescription(JSON.parse(input)));
             const answer = await pc.createAnswer();
             await pc.setLocalDescription(answer);
-        }
+        } catch(e) { showError("Ошибка в Шаге 2: " + e.message); }
+    }
 
-        async function doFinalize() {
-            console.log("Завершаю...");
-            const str = document.getElementById('input').value;
-            await pc.setRemoteDescription(JSON.parse(str));
-        }
+    async function handleFinal() {
+        try {
+            log("Завершение...");
+            const input = document.getElementById('inBox').value.trim();
+            if (!input) throw new Error("Поле пустое!");
+            await pc.setRemoteDescription(new RTCSessionDescription(JSON.parse(input)));
+        } catch(e) { showError("Ошибка в Шаге 3: " + e.message); }
+    }
 
-        function doSend() {
-            const val = document.getElementById('msg').value;
+    function handleSend() {
+        const val = document.getElementById('msg').value;
+        if (dc && dc.readyState === 'open') {
             dc.send(val);
-            append("Я: " + val);
+            document.getElementById('chat').innerHTML += "<div>Я: "+val+"</div>";
             document.getElementById('msg').value = "";
-        }
-
-        function append(txt) {
-            document.getElementById('chat').innerHTML += `<div>${txt}</div>`;
-        }
-    </script>
+        } else { alert("Связи еще нет!"); }
+    }
+</script>
 </body>
 </html>
