@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebRTC P2P MVP - Тест связи</title>
+    <style>
+        body { font-family: -apple-system, sans-serif; line-height: 1.5; padding: 20px; max-width: 700px; margin: 0 auto; background: #f4f7f9; }
+        .box { background: white; border: 1px solid #d1d9e0; padding: 20px; margin-bottom: 20px; border-radius: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
+        h2 { font-size: 1.2em; margin-top: 0; color: #24292e; }
+        textarea { width: 100%; height: 80px; margin: 10px 0; font-family: monospace; font-size: 11px; border: 1px solid #ccc; border-radius: 5px; padding: 8px; box-sizing: border-box; resize: none; }
+        button { padding: 10px 15px; cursor: pointer; background: #28a745; color: white; border: none; border-radius: 6px; font-weight: bold; transition: 0.2s; }
+        button:hover { background: #218838; }
+        button:disabled { background: #ccc; cursor: not-allowed; }
+        .blue { background: #007bff; }
+        .blue:hover { background: #0069d9; }
+        #chat { height: 150px; border: 1px solid #e1e4e8; overflow-y: scroll; background: #fff; padding: 10px; margin-bottom: 10px; border-radius: 6px; font-size: 0.9em; }
+        .status-bar { font-size: 0.85em; font-weight: bold; margin-bottom: 10px; padding: 5px 10px; border-radius: 4px; background: #eef; display: inline-block; }
+        .instr { font-size: 0.85em; color: #586069; margin-bottom: 10px; }
+    </style>
+</head>
+<body>
+
+    <h1>WebRTC MVP Test</h1>
+
+    <div class="box">
+        <h2>Шаг 1: Инициация (Алиса)</h2>
+        <p class="instr">Нажмите, чтобы создать приглашение (Offer), скопируйте его и отправьте второму устройству.</p>
+        <button onclick="createOffer()" class="blue">Создать Оффер</button>
+        <textarea id="localSDP" readonly placeholder="Тут появится ваш код..."></textarea>
+    </div>
+
+    <div class="box">
+        <h2>Шаг 2: Ответ (Боб)</h2>
+        <p class="instr">Вставьте код от Алисы, нажмите «Принять» и скопируйте ответный код обратно Алисе.</p>
+        <textarea id="remoteSDP" placeholder="Вставьте код партнера сюда..."></textarea>
+        <button onclick="acceptOffer()">Принять Оффер и дать Ответ</button>
+    </div>
+
+    <div class="box">
+        <h2>Шаг 3: Соединение (Алиса)</h2>
+        <p class="instr">Алиса вставляет ответ от Боба здесь для завершения связи.</p>
+        <button onclick="finalize()" class="blue">Вставить ответ и соединиться</button>
+    </div>
+
+    <div class="box">
+        <h2>Диалог (P2P)</h2>
+        <div id="connType" class="status-bar">Статус: Ожидание создания канала...</div>
+        <div id="chat"></div>
+        <div style="display:flex; gap: 10px;">
+            <input type="text" id="message" placeholder="Введите сообщение..." style="flex-grow:1; padding: 8px; border-radius: 5px; border: 1px solid #ccc;">
+            <button onclick="sendMessage()" id="sendBtn" disabled>Послать</button>
+        </div>
+    </div>
+
+    <script>
+        // Используем публичный STUN сервер Google
+        const config = { 
+            iceServers: [{ urls: "stun:://google.com" }],
+            iceCandidatePoolSize: 10 
+        };
+        
+        let pc = new RTCPeerConnection(config);
+        let dc = null;
+
+        // Следим за сбором ICE-кандидатов (автоматически обновляем поле с кодом)
+        pc.onicecandidate = e => {
+            if (!e.candidate) {
+                document.getElementById('localSDP').value = JSON.stringify(pc.localDescription);
+                document.getElementById('localSDP').select();
+            }
+        };
+
+        // Если нам создают канал (для Боба)
+        pc.ondatachannel = e => {
+            setupDataChannel(e.channel);
+        };
+
+        function setupDataChannel(channel) {
+            dc = channel;
+            dc.onopen = () => {
+                document.getElementById('connType').innerHTML = "Статус: СОЕДИНЕНО";
+                document.getElementById('sendBtn').disabled = false;
+                appendChat("СИСТЕМА: Канал открыт напрямую!");
+                setInterval(checkStats, 2000); // Проверка типа связи
+            };
+            dc.onmessage = e => appendChat("ПАРТНЕР: " + e.data);
+            dc.onclose = () => {
+                document.getElementById('connType').innerHTML = "Статус: ЗАКРЫТО";
+                document.getElementById('sendBtn').disabled = true;
+            };
+        }
+
+        // Логика Алисы: Создать Оффер
+        async function createOffer() {
+            dc = pc.createDataChannel("chat");
+            setupDataChannel(dc);
+            const offer = await pc.createOffer();
+            await pc.setLocalDescription(offer);
+        }
+
+        // Логика Боба: Принять Оффер и создать Ответ
+        async function acceptOffer() {
+            const val = document.getElementById('remoteSDP').value;
+            if (!val) return alert("Вставьте код оффера!");
+            const offer = new RTCSessionDescription(JSON.parse(val));
+            await pc.setRemoteDescription(offer);
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
+        }
+
+        // Финал Алисы: Принять Ответ от Боба
+        async function finalize() {
+            const val = document.getElementById('remoteSDP').value;
+            if (!val) return alert("Вставьте код ответа!");
+            const answer = new RTCSessionDescription(JSON.parse(val));
+            await pc.setRemoteDescription(answer);
+        }
+
+        // Отправка сообщений
+        function sendMessage() {
+            const input = document.getElementById('message');
+            if (dc && input.value) {
+                dc.send(input.value);
+                appendChat("Я: " + input.value);
+                input.value = "";
+            }
+        }
+
+        function appendChat(msg) {
+            const chat = document.getElementById('chat');
+            chat.innerHTML += `<div>${msg}</div>`;
+            chat.scrollTop = chat.scrollHeight;
+        }
+
+        // Проверка типа соединения (P2P или Relay)
+        async function checkStats() {
+            const stats = await pc.getStats();
+            stats.forEach(report => {
+                if (report.type === 'remote-candidate') {
+                    const type = report.candidateType; // host, srflx, relay
+                    document.getElementById('connType').innerHTML = 
+                        `Статус: СОЕДИНЕНО | Тип: <span style="color:green">${type.toUpperCase()}</span>`;
+                }
+            });
+        }
+    </script>
+</body>
+</html>
